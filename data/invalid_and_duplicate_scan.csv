@@ -1,0 +1,6 @@
+asset_id,asset_name,cve_id,internet_exposed,business_criticality,environment
+AST-001,payment-api-server,CVE-2021-44228,true,critical,production
+AST-001,payment-api-server,CVE-2021-44228,true,critical,production
+AST-002,employee-portal,CVE-ABC-123,true,high,production
+AST-003,testing-server,CVE-2022-22965,maybe,low,development
+AST-004,public-web-gateway,CVE-2023-44487,true,high,production

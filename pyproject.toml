@@ -1,0 +1,10 @@
+[project]
+name = "sentinelprior"
+version = "1.0.0"
+description = "Agentic vulnerability triage and remediation assistant"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"

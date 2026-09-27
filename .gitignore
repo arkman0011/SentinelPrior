@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.edge-render-profile/
+.build-artifacts/
+.env
+outputs/*
+!outputs/.gitkeep
+*.pyc
+.coverage
+htmlcov/
+.DS_Store
+Thumbs.db
