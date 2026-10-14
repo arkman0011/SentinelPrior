@@ -125,3 +125,17 @@ The RAG configuration remains:
 
 The provider fallback order remains Groq, Gemini and Mistral. API keys stay in
 `.env`; never commit that file.
+
+## Qdrant Cloud
+
+Add the cluster endpoint and API key to the local `.env` file:
+
+```dotenv
+QDRANT_URL=https://your-cluster-endpoint
+QDRANT_API_KEY=your_qdrant_api_key
+QDRANT_COLLECTION=sentinelprior_cve_rag
+```
+
+Then run the normal RAG pipeline. It creates the collection and uploads the
+current chunks to Qdrant Cloud. If `QDRANT_URL` is absent, SentinelPrior keeps
+using the established local `data/qdrant/` index.

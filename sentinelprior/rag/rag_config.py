@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+from typing import Any
 
 from sentinelprior.paths import DATA_DIR, ENV_FILE
 RAG_DOCUMENTS_FILE = DATA_DIR / "rag_cve_documents.json"
@@ -34,3 +36,25 @@ def load_dotenv() -> None:
         value = value.strip().strip('"').strip("'")
         if key and key not in os.environ:
             os.environ[key] = value
+
+
+def qdrant_connection(
+    local_path: Path = QDRANT_PATH,
+) -> tuple[dict[str, Any], str]:
+    """Return Qdrant Cloud settings, falling back to the established local index."""
+    load_dotenv()
+    url = os.getenv("QDRANT_URL", "").strip().rstrip("/")
+    api_key = os.getenv("QDRANT_API_KEY", "").strip()
+    if url:
+        if not api_key:
+            raise RuntimeError("QDRANT_API_KEY is required when QDRANT_URL is configured.")
+        return {"url": url, "api_key": api_key, "timeout": 60}, url
+
+    local_path.mkdir(parents=True, exist_ok=True)
+    return {"path": str(local_path)}, str(local_path.resolve())
+
+
+def qdrant_collection_name(default: str = QDRANT_COLLECTION) -> str:
+    """Allow deployments to select a collection without changing source code."""
+    load_dotenv()
+    return os.getenv("QDRANT_COLLECTION", default).strip() or default

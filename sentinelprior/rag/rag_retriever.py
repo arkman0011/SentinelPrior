@@ -13,6 +13,8 @@ from sentinelprior.rag.rag_config import (
     RERANKER_MODEL,
     RERANK_LIMIT,
     RETRIEVAL_LIMIT,
+    qdrant_collection_name,
+    qdrant_connection,
 )
 
 
@@ -36,19 +38,17 @@ class RAGRetriever:
                 "python -m pip install fastembed qdrant-client semchunk"
             ) from error
 
-        if not qdrant_path.exists():
-            raise RuntimeError(
-                f"Qdrant index not found at {qdrant_path}. Run run_rag_pipeline.py first."
-            )
-        self.collection_name = collection_name
+        self.collection_name = qdrant_collection_name(collection_name)
         self._FieldCondition = FieldCondition
         self._Filter = Filter
         self._MatchValue = MatchValue
-        self.client = QdrantClient(path=str(qdrant_path))
-        if not self.client.collection_exists(collection_name):
+        connection, storage_location = qdrant_connection(qdrant_path)
+        self.client = QdrantClient(**connection)
+        if not self.client.collection_exists(self.collection_name):
             self.client.close()
             raise RuntimeError(
-                f"Qdrant collection '{collection_name}' does not exist. Run run_rag_pipeline.py first."
+                f"Qdrant collection '{self.collection_name}' does not exist at "
+                f"{storage_location}. Run the RAG pipeline first."
             )
         self.embedder = TextEmbedding(model_name=EMBEDDING_MODEL)
         self.reranker = TextCrossEncoder(model_name=RERANKER_MODEL)

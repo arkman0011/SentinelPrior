@@ -1,4 +1,4 @@
-"""Embed RAG chunks with BGE and store them in a local Qdrant collection."""
+"""Embed RAG chunks with BGE and store them in Qdrant Cloud or locally."""
 
 from __future__ import annotations
 
@@ -14,6 +14,8 @@ from sentinelprior.rag.rag_config import (
     QDRANT_PATH,
     RAG_CHUNKS_FILE,
     RAG_DOCUMENTS_FILE,
+    qdrant_collection_name,
+    qdrant_connection,
 )
 
 
@@ -49,8 +51,9 @@ def index_documents(
             f"Unexpected embedding dimension {dimension}; expected {EMBEDDING_DIMENSION}"
         )
 
-    qdrant_path.mkdir(parents=True, exist_ok=True)
-    client = QdrantClient(path=str(qdrant_path))
+    collection_name = qdrant_collection_name(collection_name)
+    connection, storage_location = qdrant_connection(qdrant_path)
+    client = QdrantClient(**connection)
     try:
         if client.collection_exists(collection_name):
             client.delete_collection(collection_name)
@@ -74,7 +77,7 @@ def index_documents(
     return {
         "documentsFile": str(documents_path.resolve()),
         "chunksFile": str(chunks_path.resolve()),
-        "qdrantPath": str(qdrant_path.resolve()),
+        "qdrantPath": storage_location,
         "collection": collection_name,
         "embeddingModel": EMBEDDING_MODEL,
         "chunksStored": stored,
