@@ -97,6 +97,12 @@ Start the unified interactive assistant:
 & ".\.venv\Scripts\python.exe" chat.py
 ```
 
+Start the Streamlit interface:
+
+```powershell
+& ".\.venv\Scripts\python.exe" -m streamlit run app.py
+```
+
 Ask one question directly:
 
 ```powershell

@@ -6,6 +6,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 from time import perf_counter
+from typing import Callable
 
 from sentinelprior.rag.rag_llm import GroundedLLM
 from sentinelprior.rag.rag_retriever import RAGRetriever
@@ -66,7 +67,8 @@ def answer_question(
     llm: GroundedLLM,
     max_rows: int = 20,
     show_timing: bool = False,
-) -> None:
+    on_token: Callable[[str], None] | None = None,
+) -> dict:
     total_started = perf_counter()
     timings: dict[str, float] = {}
     timings_lock = Lock()
@@ -126,7 +128,8 @@ def answer_question(
     has_sql_answer = sql_has_rows(sql_rows)
 
     # The final response is selected only after both retrieval attempts finish.
-    stream = AnswerStream()
+    stream = AnswerStream() if on_token is None else None
+    token_writer = stream.write if stream is not None else on_token
     llm_started = perf_counter()
     if has_rag_answer or has_sql_answer:
         answer, answer_provider = llm.answer_combined(
@@ -134,38 +137,54 @@ def answer_question(
             rag_evidence,
             str(sql_result.sql) if sql_result is not None else "No SQL result",
             sql_rows,
-            on_token=stream.write,
+            on_token=token_writer,
         )
         answer_mode = "local evidence"
     else:
-        answer, answer_provider = llm.answer_no_evidence(question, on_token=stream.write)
+        answer, answer_provider = llm.answer_no_evidence(question, on_token=token_writer)
         answer_mode = (
             "safe refusal; no local evidence found"
             if answer_provider == "Safety filter"
             else "LLM conversation; no local evidence required"
         )
     timings["llm"] = perf_counter() - llm_started
-    stream.finish(answer, answer_provider)
-    print(f"\nAnswer mode: {answer_mode}")
-    print("\nEvidence path")
-    print("-------------")
+    rag_source = ""
     if rag_evidence:
         metadata = rag_evidence[0].get("metadata") or {}
-        print(
-            f"RAG: {metadata.get('cveId', 'UNKNOWN')} "
-            f"(top 1 after reranking)"
-        )
-    else:
-        detail = f" ({rag_error[:160]})" if rag_error else ""
-        print(f"RAG: no sufficiently relevant descriptive evidence{detail}")
-    if sql_result is not None:
-        print(f"SQLite/TextSQL: {sql_provider}")
-        print(f"Generated SQL: {sql_result.sql}")
-    else:
-        detail = f" ({sql_error[:160]})" if sql_error else ""
-        print(f"SQLite/TextSQL: no result{detail}")
-    if show_timing:
-        print_timings(timings, total_started)
+        rag_source = str(metadata.get("cveId") or "UNKNOWN")
+
+    result = {
+        "answer": answer,
+        "provider": answer_provider,
+        "answerMode": answer_mode,
+        "ragSource": rag_source,
+        "ragError": rag_error,
+        "sqlProvider": sql_provider if sql_result is not None else "",
+        "sql": str(sql_result.sql) if sql_result is not None else "",
+        "sqlError": sql_error,
+        "timings": timings,
+        "totalSeconds": perf_counter() - total_started,
+    }
+
+    if stream is not None:
+        stream.finish(answer, answer_provider)
+        print(f"\nAnswer mode: {answer_mode}")
+        print("\nEvidence path")
+        print("-------------")
+        if rag_source:
+            print(f"RAG: {rag_source} (top 1 after reranking)")
+        else:
+            detail = f" ({rag_error[:160]})" if rag_error else ""
+            print(f"RAG: no sufficiently relevant descriptive evidence{detail}")
+        if sql_result is not None:
+            print(f"SQLite/TextSQL: {sql_provider}")
+            print(f"Generated SQL: {sql_result.sql}")
+        else:
+            detail = f" ({sql_error[:160]})" if sql_error else ""
+            print(f"SQLite/TextSQL: no result{detail}")
+        if show_timing:
+            print_timings(timings, total_started)
+    return result
 
 
 def parse_args() -> argparse.Namespace:
