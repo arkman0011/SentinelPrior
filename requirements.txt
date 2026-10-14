@@ -1,5 +1,7 @@
-openai>=2.0,<3.0
-pydantic>=2.7,<3.0
-python-dotenv>=1.0,<2.0
-requests>=2.32,<3.0
-pytest>=8.0,<9.0
+# Part 1 uses only Python's standard library.
+crewai
+streamlit==1.50.0
+text2sql-framework[openai]==0.4.0
+fastembed==0.9.0
+qdrant-client==1.19.1
+semchunk==4.1.1

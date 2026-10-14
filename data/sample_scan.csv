@@ -1,6 +1,0 @@
-asset_id,asset_name,cve_id,internet_exposed,business_criticality,environment
-AST-001,payment-api-server,CVE-2021-44228,true,critical,production
-AST-002,perimeter-firewall,CVE-2024-3400,true,high,production
-AST-003,public-search-service,CVE-2022-42889,true,high,production
-AST-004,internal-reporting-test,CVE-2021-44832,false,medium,development
-AST-005,isolated-build-server,CVE-2024-3094,false,low,development
