@@ -3,16 +3,52 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
+from sentinelprior.ingestion.enrichment import load_dotenv
 from sentinelprior.paths import DATA_DIR
 
 
 DEFAULT_INPUT = DATA_DIR / "enriched_cves.json"
 DEFAULT_DATABASE = DATA_DIR / "sentinelprior_textsql.db"
+
+CVE_COLUMNS = (
+    "cve_id", "state", "published_at", "updated_at", "nvd_status", "description",
+    "vendor", "product", "affected_products", "cvss_version", "cvss_score",
+    "cvss_severity", "cvss_vector", "attack_vector", "attack_complexity",
+    "privileges_required", "user_interaction", "scope", "confidentiality_impact",
+    "integrity_impact", "availability_impact", "exploitability_score", "impact_score",
+    "epss_score", "epss_percentile", "epss_date", "cisa_kev_listed",
+    "cisa_date_added", "cisa_due_date", "known_ransomware_use",
+    "cisa_required_action", "cwes", "source_path", "enriched_text_card",
+    "affected_json", "nvd_json", "enriched_at", "loaded_at",
+)
+
+SCHEMA_COLUMNS = (
+    ("cve_id", "TEXT PRIMARY KEY"), ("state", "TEXT"),
+    ("published_at", "TEXT"), ("updated_at", "TEXT"), ("nvd_status", "TEXT"),
+    ("description", "TEXT"), ("vendor", "TEXT"), ("product", "TEXT"),
+    ("affected_products", "TEXT"), ("cvss_version", "TEXT"),
+    ("cvss_score", "REAL"), ("cvss_severity", "TEXT"),
+    ("cvss_vector", "TEXT"), ("attack_vector", "TEXT"),
+    ("attack_complexity", "TEXT"), ("privileges_required", "TEXT"),
+    ("user_interaction", "TEXT"), ("scope", "TEXT"),
+    ("confidentiality_impact", "TEXT"), ("integrity_impact", "TEXT"),
+    ("availability_impact", "TEXT"), ("exploitability_score", "REAL"),
+    ("impact_score", "REAL"), ("epss_score", "REAL"),
+    ("epss_percentile", "REAL"), ("epss_date", "TEXT"),
+    ("cisa_kev_listed", "INTEGER"), ("cisa_date_added", "TEXT"),
+    ("cisa_due_date", "TEXT"), ("known_ransomware_use", "TEXT"),
+    ("cisa_required_action", "TEXT"), ("cwes", "TEXT"),
+    ("source_path", "TEXT"), ("enriched_text_card", "TEXT"),
+    ("affected_json", "TEXT"), ("nvd_json", "TEXT"),
+    ("enriched_at", "TEXT"), ("loaded_at", "TEXT"),
+)
 
 
 CREATE_TABLE = """
@@ -113,6 +149,45 @@ ON CONFLICT(cve_id) DO UPDATE SET
     enriched_at=excluded.enriched_at,
     loaded_at=excluded.loaded_at
 """
+
+POSTGRES_UPSERT = f"""
+INSERT INTO cves ({', '.join(CVE_COLUMNS)})
+VALUES ({', '.join(':' + column for column in CVE_COLUMNS)})
+ON CONFLICT(cve_id) DO UPDATE SET
+{', '.join(f'{column}=excluded.{column}' for column in CVE_COLUMNS if column != 'cve_id')}
+"""
+
+
+def configured_database_url(database_path: Path = DEFAULT_DATABASE) -> str:
+    """Use Supabase PostgreSQL when configured; otherwise preserve SQLite."""
+    load_dotenv()
+    url = os.getenv("SUPABASE_DB_URL", "").strip()
+    if not url:
+        return f"sqlite:///{database_path.resolve().as_posix()}"
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    if "://" in url and "@" in url:
+        scheme, remainder = url.split("://", 1)
+        user_info, host_info = remainder.rsplit("@", 1)
+        if ":" in user_info:
+            username, password = user_info.split(":", 1)
+            user_info = f"{quote(username, safe='.%')}:{quote(password, safe='%')}"
+            url = f"{scheme}://{user_info}@{host_info}"
+    if url.startswith("postgresql://"):
+        url = "postgresql+psycopg://" + url[len("postgresql://"):]
+    if "sslmode=" not in url:
+        url += ("&" if "?" in url else "?") + "sslmode=require"
+    return url
+
+
+def using_supabase() -> bool:
+    load_dotenv()
+    return bool(os.getenv("SUPABASE_DB_URL", "").strip())
+
+
+def schema_metadata() -> str:
+    columns = "\n".join(f"- {name}: {column_type}" for name, column_type in SCHEMA_COLUMNS)
+    return f"The complete database schema is already known.\nTable: cves\nColumns:\n{columns}"
 
 
 def text(value: Any) -> str | None:
@@ -218,9 +293,34 @@ def load_enriched_cves(
     """Upsert every enriched record into one TextSQL-friendly CVE table."""
     payload = json.loads(input_path.read_text(encoding="utf-8-sig"))
     records = payload.get("records") or []
-    database_path.parent.mkdir(parents=True, exist_ok=True)
     loaded_at = datetime.now(timezone.utc).isoformat()
 
+    if using_supabase():
+        try:
+            from sqlalchemy import create_engine, text as sql_text
+        except ImportError as error:
+            raise RuntimeError(
+                'PostgreSQL dependencies are missing. Run: pip install "psycopg[binary]"'
+            ) from error
+
+        rows = [
+            dict(zip(CVE_COLUMNS, row_values(record, loaded_at), strict=True))
+            for record in records
+            if record.get("cveId")
+        ]
+        engine = create_engine(configured_database_url(database_path), pool_pre_ping=True)
+        try:
+            # Replacement is atomic: yesterday's rows remain if today's load fails.
+            with engine.begin() as connection:
+                connection.execute(sql_text(CREATE_TABLE))
+                connection.execute(sql_text("DELETE FROM cves"))
+                if rows:
+                    connection.execute(sql_text(POSTGRES_UPSERT), rows)
+        finally:
+            engine.dispose()
+        return len(rows)
+
+    database_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(database_path) as connection:
         connection.execute(CREATE_TABLE)
         count = 0

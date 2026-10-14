@@ -8,7 +8,7 @@ from sentinelprior.ingestion.enrichment import enrich
 from sentinelprior.paths import DATA_DIR
 from sentinelprior.rag.rag_cleaner import prepare_rag_documents
 from sentinelprior.rag.rag_indexer import index_documents
-from sentinelprior.sql.textsql_database import load_enriched_cves
+from sentinelprior.sql.textsql_database import load_enriched_cves, using_supabase
 
 
 RAW_FILE = DATA_DIR / "raw_cves.json"
@@ -35,9 +35,10 @@ def main() -> None:
         f"{len(enriched.get('errors') or [])} warning(s)"
     )
 
-    print("4/6 Loading the full enriched records into SQLite...")
+    destination = "Supabase PostgreSQL" if using_supabase() else "SQLite"
+    print(f"4/6 Loading the current enriched records into {destination}...")
     loaded = load_enriched_cves(ENRICHED_FILE, DATABASE_FILE)
-    print(f"    Loaded {loaded} CVE(s) into {DATABASE_FILE}")
+    print(f"    Loaded {loaded} CVE(s) into {destination}")
 
     print("5/6 Preparing the reduced descriptive RAG JSON...")
     prepared = prepare_rag_documents(ENRICHED_FILE, RAG_DOCUMENTS_FILE)

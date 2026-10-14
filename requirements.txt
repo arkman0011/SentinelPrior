@@ -2,6 +2,7 @@
 crewai
 streamlit==1.50.0
 text2sql-framework[openai]==0.4.0
+psycopg[binary]>=3.2,<4
 fastembed==0.9.0
 qdrant-client==1.19.1
 semchunk==4.1.1

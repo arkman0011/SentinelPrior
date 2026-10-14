@@ -126,6 +126,17 @@ The RAG configuration remains:
 The provider fallback order remains Groq, Gemini and Mistral. API keys stay in
 `.env`; never commit that file.
 
+## Supabase PostgreSQL
+
+Set `SUPABASE_DB_URL` to the Supabase session-pooler connection string. The
+daily pipeline then replaces the `cves` table in one transaction with the
+current batch. If that transaction fails, the preceding batch remains intact.
+When the variable is absent, the established local SQLite database is used.
+
+Generated JSON files are temporary pipeline files and are not uploaded to
+Supabase Storage. Qdrant is rebuilt from the current RAG documents during the
+same daily run, so PostgreSQL and Qdrant both expose only the newest batch.
+
 ## Qdrant Cloud
 
 Add the cluster endpoint and API key to the local `.env` file:

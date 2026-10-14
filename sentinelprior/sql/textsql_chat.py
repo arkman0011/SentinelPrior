@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sqlite3
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -13,7 +12,12 @@ from typing import Any
 
 from sentinelprior.ingestion.enrichment import load_dotenv
 from sentinelprior.paths import DATA_DIR
-from sentinelprior.sql.textsql_database import DEFAULT_DATABASE
+from sentinelprior.sql.textsql_database import (
+    DEFAULT_DATABASE,
+    configured_database_url,
+    schema_metadata,
+    using_supabase,
+)
 
 
 SCENARIOS = Path(__file__).with_name("scenarios.md")
@@ -56,10 +60,6 @@ PROVIDERS = {
 }
 
 
-def database_url(path: Path) -> str:
-    return f"sqlite:///{path.resolve().as_posix()}"
-
-
 def requested_providers() -> list[Provider]:
     configured = os.getenv("TEXTSQL_PROVIDER_ORDER", DEFAULT_PROVIDER_ORDER)
     names = [name.strip().casefold() for name in configured.split(",") if name.strip()]
@@ -71,29 +71,14 @@ def requested_providers() -> list[Provider]:
 
 
 @lru_cache(maxsize=1)
-def cached_schema_metadata(database_path: str) -> str:
-    """Read the stable SQLite schema once and reuse it for every TextSQL engine."""
-    connection = sqlite3.connect(database_path)
-    try:
-        rows = connection.execute("PRAGMA table_info('cves')").fetchall()
-    finally:
-        connection.close()
-    if not rows:
-        raise RuntimeError("The expected SQLite table 'cves' was not found.")
-    columns = "\n".join(
-        f"- {name}: {column_type or 'TEXT'}"
-        for _cid, name, column_type, _not_null, _default, _primary_key in rows
-    )
-    return (
-        "The complete database schema is already known and cached.\n"
-        "Table: cves\n"
-        f"Columns:\n{columns}"
-    )
+def cached_schema_metadata() -> str:
+    """Reuse the stable CVE schema for SQLite and Supabase PostgreSQL."""
+    return schema_metadata()
 
 
 TEXTSQL_INSTRUCTIONS = """The complete schema for this single-table database is supplied in
-Custom Metadata. Do not query sqlite_master and do not run PRAGMA schema
-discovery. Use the supplied cves columns, write the requested read-only SELECT
+Custom Metadata. Do not query system catalogs or run schema discovery. Use the
+supplied cves columns, write the requested read-only SELECT
 or WITH query, and execute it with execute_sql. Retry only if that query returns
 an actual SQL execution error. Do not treat greetings or general conversation
 as SQL."""
@@ -101,7 +86,8 @@ as SQL."""
 
 def build_engines() -> list[tuple[Provider, Any]]:
     """Build one TextSQL engine per configured provider without making API calls."""
-    if not DEFAULT_DATABASE.exists():
+    load_dotenv()
+    if not using_supabase() and not DEFAULT_DATABASE.exists():
         raise RuntimeError(
             f"SQLite database not found: {DEFAULT_DATABASE}. "
             "Run textsql_database.py or run_textsql_pipeline.py first."
@@ -113,9 +99,9 @@ def build_engines() -> list[tuple[Provider, Any]]:
             'TextSQL is not installed. Run: python -m pip install "text2sql-framework[openai]"'
         ) from error
 
-    load_dotenv()
     TRACES_DIR.mkdir(parents=True, exist_ok=True)
-    schema_metadata = cached_schema_metadata(str(DEFAULT_DATABASE.resolve()))
+    metadata = cached_schema_metadata()
+    connection_string = configured_database_url(DEFAULT_DATABASE)
     engines: list[tuple[Provider, Any]] = []
     missing: list[str] = []
 
@@ -132,11 +118,11 @@ def build_engines() -> list[tuple[Provider, Any]]:
         os.environ["OPENAI_BASE_URL"] = provider.base_url
         model = os.getenv(provider.model_variable, provider.default_model)
         engine = TextSQL(
-            database_url(DEFAULT_DATABASE),
+            connection_string,
             model=model,
             instructions=TEXTSQL_INSTRUCTIONS,
             examples=str(SCENARIOS),
-            metadata_hint=schema_metadata,
+            metadata_hint=metadata,
             trace_file=str(TRACES_DIR / f"textsql_traces_{provider.name.casefold()}.jsonl"),
         )
         engines.append((provider, engine))

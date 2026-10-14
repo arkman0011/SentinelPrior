@@ -7,7 +7,7 @@ from pathlib import Path
 from sentinelprior.ingestion.clean_cves import clean_file
 from sentinelprior.ingestion.collector import collect
 from sentinelprior.ingestion.enrichment import enrich
-from sentinelprior.sql.textsql_database import load_enriched_cves
+from sentinelprior.sql.textsql_database import load_enriched_cves, using_supabase
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -35,9 +35,10 @@ def main() -> None:
         f"{len(enriched.get('errors') or [])} warning(s)"
     )
 
-    print("4/4 Loading enriched CVEs into the TextSQL SQLite table...")
+    destination = "Supabase PostgreSQL" if using_supabase() else "SQLite"
+    print(f"4/4 Loading current enriched CVEs into {destination}...")
     loaded = load_enriched_cves(ENRICHED_FILE, DATABASE_FILE)
-    print(f"    Loaded {loaded} CVEs into {DATABASE_FILE}")
+    print(f"    Loaded {loaded} CVEs into {destination}")
 
     print("\nPipeline complete.")
     print('Next command: python -m sentinelprior.sql.textsql_chat')
