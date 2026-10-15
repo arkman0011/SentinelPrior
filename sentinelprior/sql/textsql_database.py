@@ -25,7 +25,8 @@ CVE_COLUMNS = (
     "integrity_impact", "availability_impact", "exploitability_score", "impact_score",
     "epss_score", "epss_percentile", "epss_date", "cisa_kev_listed",
     "cisa_date_added", "cisa_due_date", "known_ransomware_use",
-    "cisa_required_action", "cwes", "source_path", "enriched_text_card",
+    "cisa_required_action", "remediation", "vendor_solutions", "cwes",
+    "source_path", "enriched_text_card",
     "affected_json", "nvd_json", "enriched_at", "loaded_at",
 )
 
@@ -44,7 +45,8 @@ SCHEMA_COLUMNS = (
     ("epss_percentile", "REAL"), ("epss_date", "TEXT"),
     ("cisa_kev_listed", "INTEGER"), ("cisa_date_added", "TEXT"),
     ("cisa_due_date", "TEXT"), ("known_ransomware_use", "TEXT"),
-    ("cisa_required_action", "TEXT"), ("cwes", "TEXT"),
+    ("cisa_required_action", "TEXT"), ("remediation", "TEXT"),
+    ("vendor_solutions", "TEXT"), ("cwes", "TEXT"),
     ("source_path", "TEXT"), ("enriched_text_card", "TEXT"),
     ("affected_json", "TEXT"), ("nvd_json", "TEXT"),
     ("enriched_at", "TEXT"), ("loaded_at", "TEXT"),
@@ -84,6 +86,8 @@ CREATE TABLE IF NOT EXISTS cves (
     cisa_due_date TEXT,
     known_ransomware_use TEXT,
     cisa_required_action TEXT,
+    remediation TEXT,
+    vendor_solutions TEXT,
     cwes TEXT,
     source_path TEXT,
     enriched_text_card TEXT,
@@ -104,11 +108,12 @@ INSERT INTO cves (
     integrity_impact, availability_impact, exploitability_score, impact_score,
     epss_score, epss_percentile, epss_date, cisa_kev_listed,
     cisa_date_added, cisa_due_date, known_ransomware_use,
-    cisa_required_action, cwes, source_path, enriched_text_card,
+    cisa_required_action, remediation, vendor_solutions, cwes,
+    source_path, enriched_text_card,
     affected_json, nvd_json, enriched_at, loaded_at
 ) VALUES (
     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 )
 ON CONFLICT(cve_id) DO UPDATE SET
     state=excluded.state,
@@ -141,6 +146,8 @@ ON CONFLICT(cve_id) DO UPDATE SET
     cisa_due_date=excluded.cisa_due_date,
     known_ransomware_use=excluded.known_ransomware_use,
     cisa_required_action=excluded.cisa_required_action,
+    remediation=excluded.remediation,
+    vendor_solutions=excluded.vendor_solutions,
     cwes=excluded.cwes,
     source_path=excluded.source_path,
     enriched_text_card=excluded.enriched_text_card,
@@ -156,6 +163,11 @@ VALUES ({', '.join(':' + column for column in CVE_COLUMNS)})
 ON CONFLICT(cve_id) DO UPDATE SET
 {', '.join(f'{column}=excluded.{column}' for column in CVE_COLUMNS if column != 'cve_id')}
 """
+
+POSTGRES_MIGRATIONS = (
+    "ALTER TABLE cves ADD COLUMN IF NOT EXISTS remediation TEXT",
+    "ALTER TABLE cves ADD COLUMN IF NOT EXISTS vendor_solutions TEXT",
+)
 
 
 def configured_database_url(database_path: Path = DEFAULT_DATABASE) -> str:
@@ -234,6 +246,21 @@ def affected_summary(record: dict) -> tuple[str | None, str | None, str | None]:
     )
 
 
+def guidance_summary(value: Any) -> str | None:
+    """Store source-grounded guidance as readable multi-line SQL text."""
+    if isinstance(value, list):
+        return "\n".join(distinct([text(item) for item in value])) or None
+    return text(value)
+
+
+def ensure_sqlite_columns(connection: sqlite3.Connection) -> None:
+    """Migrate existing local databases without deleting their records."""
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(cves)")}
+    for column in ("remediation", "vendor_solutions"):
+        if column not in columns:
+            connection.execute(f"ALTER TABLE cves ADD COLUMN {column} TEXT")
+
+
 def row_values(record: dict, loaded_at: str) -> tuple:
     cvss = record.get("cvss") or {}
     epss = record.get("epss") or {}
@@ -276,6 +303,8 @@ def row_values(record: dict, loaded_at: str) -> tuple:
         kev_details.get("dueDate"),
         kev_details.get("knownRansomwareCampaignUse"),
         kev_details.get("requiredAction"),
+        guidance_summary(record.get("remediation")),
+        guidance_summary(record.get("vendorSolutions")),
         ", ".join(cwes),
         record.get("sourcePath"),
         record.get("enrichedTextCard"),
@@ -313,6 +342,8 @@ def load_enriched_cves(
             # Replacement is atomic: yesterday's rows remain if today's load fails.
             with engine.begin() as connection:
                 connection.execute(sql_text(CREATE_TABLE))
+                for statement in POSTGRES_MIGRATIONS:
+                    connection.execute(sql_text(statement))
                 connection.execute(sql_text("DELETE FROM cves"))
                 if rows:
                     connection.execute(sql_text(POSTGRES_UPSERT), rows)
@@ -323,6 +354,7 @@ def load_enriched_cves(
     database_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(database_path) as connection:
         connection.execute(CREATE_TABLE)
+        ensure_sqlite_columns(connection)
         count = 0
         for record in records:
             if not record.get("cveId"):

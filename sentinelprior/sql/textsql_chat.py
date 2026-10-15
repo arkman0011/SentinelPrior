@@ -81,7 +81,8 @@ Custom Metadata. Do not query system catalogs or run schema discovery. Use the
 supplied cves columns, write the requested read-only SELECT
 or WITH query, and execute it with execute_sql. Retry only if that query returns
 an actual SQL execution error. Do not treat greetings or general conversation
-as SQL."""
+as SQL. For remediation questions, use remediation and vendor_solutions;
+cisa_required_action contains only CISA KEV instructions."""
 
 
 def build_engines() -> list[tuple[Provider, Any]]:

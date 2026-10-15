@@ -19,17 +19,17 @@ from sentinelprior.rag.rag_config import (
 )
 
 
-def required_packages() -> tuple[Any, Any, Any, Any, Any]:
+def required_packages() -> tuple[Any, Any, Any, Any, Any, Any]:
     try:
         from fastembed import TextEmbedding
         from qdrant_client import QdrantClient
-        from qdrant_client.models import Distance, PointStruct, VectorParams
+        from qdrant_client.models import Distance, PayloadSchemaType, PointStruct, VectorParams
     except ImportError as error:
         raise RuntimeError(
             "RAG packages are not installed. Run: "
             "python -m pip install fastembed qdrant-client semchunk"
         ) from error
-    return QdrantClient, Distance, PointStruct, VectorParams, TextEmbedding
+    return QdrantClient, Distance, PayloadSchemaType, PointStruct, VectorParams, TextEmbedding
 
 
 def index_documents(
@@ -38,7 +38,14 @@ def index_documents(
     qdrant_path: Path = QDRANT_PATH,
     collection_name: str = QDRANT_COLLECTION,
 ) -> dict[str, Any]:
-    QdrantClient, Distance, PointStruct, VectorParams, TextEmbedding = required_packages()
+    (
+        QdrantClient,
+        Distance,
+        PayloadSchemaType,
+        PointStruct,
+        VectorParams,
+        TextEmbedding,
+    ) = required_packages()
     model = TextEmbedding(model_name=EMBEDDING_MODEL)
     chunks = create_chunks(documents_path, chunks_path, token_counter=model.token_count)
     if not chunks:
@@ -60,6 +67,14 @@ def index_documents(
         client.create_collection(
             collection_name=collection_name,
             vectors_config=VectorParams(size=dimension, distance=Distance.COSINE),
+        )
+        # Qdrant Cloud requires a keyword payload index before exact CVE-ID
+        # filters can be used by the retriever.
+        client.create_payload_index(
+            collection_name=collection_name,
+            field_name="metadata.cveId",
+            field_schema=PayloadSchemaType.KEYWORD,
+            wait=True,
         )
         points = [
             PointStruct(

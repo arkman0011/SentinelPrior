@@ -18,6 +18,10 @@ enriched CVE record. Answer factual database questions from this table only.
 - `cisa_kev_listed` is 1 when CISA lists the CVE as known exploited and 0 when
   it does not.
 - `known_ransomware_use` records CISA's known ransomware campaign assessment.
+- `remediation` contains source-grounded corrective guidance when available.
+- `vendor_solutions` contains official patch, advisory, or release-note links.
+- `cisa_required_action` contains instructions only for CISA KEV records and
+  must not be treated as the only remediation source.
 - `published_at` and `updated_at` are ISO date-time strings.
 - `cwes` contains comma-separated CWE identifiers.
 
@@ -107,5 +111,24 @@ Question: Tell me about CVE-2026-12345.
     SELECT cve_id, description, vendor, product, published_at, nvd_status,
            cvss_score, cvss_severity, cvss_vector, epss_score,
            epss_percentile, cisa_kev_listed, cwes
+    FROM cves
+    WHERE UPPER(cve_id) = UPPER('CVE-2026-12345');
+
+## CVEs with remediation
+
+Question: Which CVE IDs have remediation or an official vendor solution?
+
+    SELECT cve_id, remediation, vendor_solutions, cisa_required_action
+    FROM cves
+    WHERE NULLIF(remediation, '') IS NOT NULL
+       OR NULLIF(vendor_solutions, '') IS NOT NULL
+       OR NULLIF(cisa_required_action, '') IS NOT NULL
+    ORDER BY cve_id;
+
+## Remediation for one CVE
+
+Question: What remediation is available for CVE-2026-12345?
+
+    SELECT cve_id, remediation, vendor_solutions, cisa_required_action
     FROM cves
     WHERE UPPER(cve_id) = UPPER('CVE-2026-12345');

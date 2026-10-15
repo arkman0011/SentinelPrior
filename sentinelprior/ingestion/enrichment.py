@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from sentinelprior.paths import DATA_DIR, ENV_FILE
+from sentinelprior.rag.rag_cleaner import remediation_lines, vendor_solution_lines
 
 
 NVD_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
@@ -313,6 +314,11 @@ def enrich(input_path: str = DEFAULT_INPUT, output_path: str = DEFAULT_OUTPUT) -
             "nvd": compact_nvd(nvd_raw),
             "enrichedAt": enriched_at,
         }
+        # Keep source-grounded remediation in the enriched contract so both
+        # the structured SQL track and the descriptive RAG track receive the
+        # same evidence. Empty guidance stays absent rather than being invented.
+        record["remediation"] = remediation_lines(record)
+        record["vendorSolutions"] = vendor_solution_lines(record)
         record["enrichedTextCard"] = enriched_text_card(record)
         enriched.append(remove_empty(record))
 
