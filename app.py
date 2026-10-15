@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from queue import Queue
 from threading import Lock, Thread
+from time import perf_counter
 
 import streamlit as st
 from sqlalchemy import create_engine, text
@@ -65,7 +66,9 @@ def database_metrics() -> dict[str, int]:
 
 
 def stream_answer(question: str) -> dict:
+    request_started = perf_counter()
     retriever, engines, llm, backend_lock = backend_resources()
+    setup_seconds = perf_counter() - request_started
     tokens: Queue[str | None] = Queue()
     state: dict = {}
 
@@ -84,18 +87,47 @@ def stream_answer(question: str) -> dict:
     worker.start()
     placeholder = st.empty()
     chunks: list[str] = []
+    first_token_seconds: float | None = None
     while True:
         token = tokens.get()
         if token is None:
             break
+        if first_token_seconds is None:
+            first_token_seconds = perf_counter() - request_started
         chunks.append(token)
         placeholder.markdown("".join(chunks) + "▌")
     worker.join()
     if "error" in state:
         raise RuntimeError(state["error"])
     result = state["result"]
+    result["setupSeconds"] = setup_seconds
+    result["firstTokenSeconds"] = first_token_seconds
+    result["streamlitTotalSeconds"] = perf_counter() - request_started
     placeholder.markdown(result["answer"])
     return result
+
+
+def show_latency_diagnostics(result: dict) -> None:
+    """Display temporary per-stage timings without changing the answer workflow."""
+    timings = result.get("timings") or {}
+    measurements = (
+        ("Setup / warm-up", result.get("setupSeconds")),
+        ("RAG + reranking", timings.get("rag")),
+        ("TextSQL + Supabase", timings.get("sql")),
+        ("First token", result.get("firstTokenSeconds")),
+        ("Final LLM", timings.get("llm")),
+        ("End-to-end", result.get("streamlitTotalSeconds")),
+    )
+    available = [(label, value) for label, value in measurements if value is not None]
+    if not available:
+        return
+    with st.expander("Latency diagnostics (testing)"):
+        columns = st.columns(3)
+        for index, (label, value) in enumerate(available):
+            columns[index % 3].metric(label, f"{float(value):.2f} s")
+        st.caption(
+            "RAG and TextSQL run in parallel; the final LLM starts after both finish."
+        )
 
 
 with st.sidebar:
@@ -136,6 +168,8 @@ for message in st.session_state.messages:
                 st.caption(message["evidence"])
                 if message.get("sql"):
                     st.code(message["sql"], language="sql")
+        if message.get("latency"):
+            show_latency_diagnostics(message["latency"])
 
 question = selected or st.chat_input("Ask about CVEs, CVSS, EPSS, KEV, impact or remediation…")
 if question:
@@ -156,12 +190,14 @@ if question:
                 st.caption(evidence)
                 if result["sql"]:
                     st.code(result["sql"], language="sql")
+            show_latency_diagnostics(result)
             st.session_state.messages.append(
                 {
                     "role": "assistant",
                     "content": result["answer"],
                     "evidence": evidence,
                     "sql": result["sql"],
+                    "latency": result,
                 }
             )
         except Exception as error:
