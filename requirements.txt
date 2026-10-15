@@ -1,5 +1,4 @@
-# Part 1 uses only Python's standard library.
-crewai
+# Runtime dependencies for the current Streamlit, TextSQL, and RAG application.
 streamlit==1.50.0
 text2sql-framework[openai]==0.4.0
 psycopg[binary]>=3.2,<4
